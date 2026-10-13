@@ -1,0 +1,94 @@
+BÀI LÀM: KIỂM TOÁN VÀ VIẾT SCRIPT DỌN DẸP AN TOÀN
+Phần 1. Phân tích mã nguồn AI (Auditing)
+Đoạn mã AI gợi ý cực kỳ nguy hiểm vì lệnh Remove-Item -Path "C:\*" -Recurse -Force có thể xóa hàng loạt tệp và thư mục trên ổ C, bao gồm dữ liệu quan trọng của hệ điều hành và người dùng.
+Thành phần
+Ý nghĩa
+Rủi ro
+-Path "C:\*"
+Chỉ định tất cả mục khớp với * ở thư mục gốc ổ C.
+Phạm vi quá rộng, không giới hạn vào thư mục log của dự án.
+-Recurse
+Xử lý cả các thư mục con và nội dung bên trong.
+Có thể mở rộng việc xóa sâu vào nhiều cấp thư mục.
+-Force
+Cho phép xử lý cả một số mục ẩn hoặc chỉ đọc mà không cần thao tác thủ công thông thường.
+Làm tăng khả năng xóa các mục mà người dùng ít nhìn thấy hoặc khó nhận ra.
+
+Hậu quả: Có thể mất dữ liệu, hỏng ứng dụng hoặc hệ thống Windows, làm gián đoạn hoạt động máy chủ Trang trại Lan thông minh và khiến việc khôi phục tốn thời gian. Dòng Write-Host "Da don dep xong!" chỉ in thông báo, không xác minh rằng thao tác đã an toàn hay thành công.
+Áp dụng 3 nguyên tắc vàng khi thẩm định mã AI
+Đọc và hiểu trước khi chạy: Xác định tác dụng của từng lệnh và tham số.
+Khoanh vùng đường dẫn: Chỉ thao tác trong thư mục dự án đã xác định, không sử dụng phạm vi rộng như C:\*.
+Kiểm thử trước khi thực thi: Liệt kê các tệp dự kiến xử lý, dùng chế độ xem trước như -WhatIf với lệnh hỗ trợ, rồi mới thực hiện khi đã xác nhận đúng phạm vi.
+Phần 2. Viết script an toàn safe_cleanup.ps1
+Giả sử cấu trúc dự án như sau:
+Smart-Farm/
+├── safe_cleanup.ps1
+└── logs/
+    ├── system.log
+    ├── issues.txt
+    └── old.tmp
+Mã nguồn:
+
+# ==========================================
+# Ten script: safe_cleanup.ps1
+# Tac gia: Sinh vien
+# Chuc nang: Loc WARNING va don dep tep .tmp
+# ==========================================
+
+# Xac dinh duong dan du an tu vi tri script
+$projectPath = $PSScriptRoot
+$logsPath = Join-Path $projectPath "logs"
+$logFile = Join-Path $logsPath "system.log"
+$reportFile = Join-Path $logsPath "issues.txt"
+
+# Kiem tra thu muc logs va tep log
+if (-not (Test-Path $logsPath -PathType Container)) {
+    Write-Host "Loi: Khong tim thay thu muc logs." -ForegroundColor Red
+    exit 1
+}
+
+if (-not (Test-Path $logFile -PathType Leaf)) {
+    Write-Host "Loi: Khong tim thay system.log." -ForegroundColor Red
+    exit 1
+}
+
+# 1. Di chuyen den thu muc logs
+Set-Location -Path $logsPath
+Write-Host "Dang xu ly log trong: $logsPath" -ForegroundColor Cyan
+
+# 2. Loc cac dong WARNING va ghi vao issues.txt
+Select-String -Path $logFile -SimpleMatch "WARNING" |
+    ForEach-Object { $_.Line } |
+    Set-Content -Path $reportFile -Encoding utf8
+
+Write-Host "Da tao bao cao issues.txt." -ForegroundColor Green
+
+# 3. Khoanh vung tep .tmp trong thu muc du an
+# Xem truoc danh sach tep se xoa
+$tmpFiles = @(Get-ChildItem -Path projectPath-Filter"*.tmp"-File-Recurse)if(tmpFiles.Count -gt 0) {
+    $tmpFiles | Remove-Item -WhatIf
+    Write-Host "Dang o che do xem truoc. Kiem tra danh sach truoc khi xoa that." -ForegroundColor Yellow
+}
+else {
+    Write-Host "Khong tim thay tep .tmp trong du an." -ForegroundColor Green
+}
+
+Lưu ý an toàn: Script trên cố ý dùng -WhatIf, nên chưa xóa tệp .tmp thật. Sau khi kiểm tra danh sách được hiển thị và xác nhận mọi đường dẫn đều nằm trong dự án, mới thay lệnh xem trước bằng lệnh xóa thực tế:
+$tmpFiles | Remove-Item
+Không thêm -Force nếu không cần thiết. Phạm vi được giới hạn bằng $projectPath, thay vì thao tác trên toàn ổ đĩa.
+Phần 3. Kiểm thử và xác minh (Verify)
+Chạy script từ PowerShell:
+.\safe_cleanup.ps1
+Sau đó kiểm tra lần lượt:
+1. Xem nội dung báo cáo
+Get-Content .\logs\issues.txt
+Kết quả phải chứa các dòng có từ WARNING trong system.log.
+2. Xác nhận tệp báo cáo đã được tạo
+Test-Path .\logs\issues.txt
+Kết quả mong đợi: True.
+3. Liệt kê các tệp .tmp còn lại trong dự án
+Get-ChildItem -Path . -Filter "*.tmp" -File -Recurse
+Khi vẫn đang dùng -WhatIf, các tệp .tmp vẫn còn. Sau khi xác nhận phạm vi và thực hiện lệnh xóa thật, chạy lại lệnh trên để kiểm tra. Nếu không có kết quả nào, nghĩa là không còn tệp .tmp phù hợp trong phạm vi đã tìm.
+Kết luận: Không nên chạy nguyên trạng script AI ban đầu. Hãy đọc mã, giới hạn phạm vi đường dẫn và xem trước thao tác trước khi xóa dữ liệu.
+
+
